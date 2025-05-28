@@ -27,7 +27,9 @@ glm::mat4 proj;
 
 int    seedCount = 20;
 float  stepSize = 0.5f;
-int    maxSteps = 800;
+int    maxSteps = 100;
+int seedCols = 20;  // 水平种子数量
+int seedRows = 20;  // 垂直种子数量
 
 vector_field vf;
 
@@ -63,27 +65,29 @@ void reshape(GLFWwindow *window, int w, int h){
 
 void rebuildStreamlines(const vector_field &vf){
     std::vector<glm::vec2> allVerts;
-    allVerts.reserve(seedCount * maxSteps);
+    allVerts.reserve(seedCols * seedRows * maxSteps);
 
-    lineVertexCounts.clear();         // 清掉旧记录
+    lineVertexCounts.clear();
 
-    for(int i = 0; i < seedCount; ++i){
-        float fx = (i + 0.5f) * vf.getWidth() / float(seedCount);
-        float fy = 0.5f * vf.getHeight();
-        auto line = integrateStreamline(vf, { fx, fy }, stepSize, maxSteps);
+    for(int j = 0; j < seedRows; ++j){
+        float fy = (j + 0.5f) * vf.getHeight() / float(seedRows);
+        for(int i = 0; i < seedCols; ++i){
+            float fx = (i + 0.5f) * vf.getWidth()  / float(seedCols);
 
-        // 记录这一条有多少点
-        lineVertexCounts.push_back((GLsizei) line.size());
-
-        // 推进 VBO 用的数组
-        for(auto &p : line)
-            allVerts.push_back(p);
+            // RK4 积分
+            auto line = integrateStreamline(vf, { fx, fy },
+                                            stepSize, maxSteps);
+            lineVertexCounts.push_back((GLsizei)line.size());
+            for(auto &p : line)
+                allVerts.push_back(p);
+        }
     }
 
+    // 上传 VBO/VAO
     streamlineVertCount = allVerts.size();
     if(streamlineVAO == 0){
         glGenVertexArrays(1, &streamlineVAO);
-        glGenBuffers(1, &streamlineVBO);
+        glGenBuffers     (1, &streamlineVBO);
     }
     glBindVertexArray(streamlineVAO);
     glBindBuffer(GL_ARRAY_BUFFER, streamlineVBO);
@@ -93,10 +97,9 @@ void rebuildStreamlines(const vector_field &vf){
         GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
-        sizeof(glm::vec2), (void *) 0);
+                          sizeof(glm::vec2), (void*)0);
     glBindVertexArray(0);
 }
-
 
 void init_data(){
     vf = vector_field("Vector/1.vec");
@@ -128,7 +131,8 @@ int main(int argc, char **argv){
         std::cout << "Failed to initialize GLAD" << std::endl;
         return -1;
     }
-    glViewport(0, 0, width, height);
+    glfwSetWindowSizeCallback(window, reshape);
+    reshape(window, width, height);
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -155,35 +159,96 @@ int main(int argc, char **argv){
 
     Shader shader("shader/shader.vert", "shader/shader.frag");
 
-    vector_field vf("Vector/1.vec");
 
-    proj = glm::ortho(0.0f, float(vf.getWidth()),
-        0.0f, float(vf.getHeight()),
+    proj = glm::ortho(0.0f, float(vf.getHeight()),
+        0.0f, float(vf.getWidth()),
         -1.0f, 1.0f);
 
     std::cout << vf.getHeight() << " " << vf.getWidth() << std::endl;
+    int imgRotation = 0;     // 角度（度）
+    bool  flipX       = false;    // 水平翻转
+    bool  flipY       = false;    // 垂直翻转
+
 
     while(!glfwWindowShouldClose(window)){
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        // 1) 新 frame
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // 2) 参数面板
+        // 我们把“生成流线”的参数放在一个单独窗口里
+        static int prevCols   = seedCols;
+        static int prevRows   = seedRows;
+        static float prevStep = stepSize;
+        static int prevMax    = maxSteps;
+
+        ImGui::Begin("Streamline Parameters");
+        // 水平、垂直种子数
+        ImGui::SliderInt("Seed Columns", &seedCols, 1, 100);
+        ImGui::SliderInt("Seed Rows",    &seedRows, 1, 100);
+        // 最大积分步数
+        ImGui::SliderInt("Max Steps",    &maxSteps, 10, 2000);
+        // RK4 步长
+        ImGui::SliderFloat("Step Size",  &stepSize, 0.01f, 5.0f);
+
+        // 如果任一参数变化，就重新 build
+        if (seedCols  != prevCols   ||
+            seedRows  != prevRows   ||
+            stepSize  != prevStep   ||
+            maxSteps  != prevMax)
+        {
+            prevCols = seedCols;
+            prevRows = seedRows;
+            prevStep = stepSize;
+            prevMax  = maxSteps;
+            rebuildStreamlines(vf);
+        }
+        ImGui::End();
+
+        // 3) Transform 面板（如果你还需要旋转/翻转的话）
+        ImGui::Begin("Transform");
+        if(ImGui::Button("Rotate 90°")) {
+            imgRotation = (imgRotation - 90 + 360) % 360;
+        }
+        ImGui::Checkbox("Flip Horizontal", &flipX);
+        ImGui::Checkbox("Flip Vertical",   &flipY);
+        ImGui::End();
+
+        // 4) 构造 Model 和 MVP（同你原本那段）
+        glm::mat4 model(1.0f);
+        float cx = vf.getWidth() * 0.5f;
+        float cy = vf.getHeight()* 0.5f;
+        model = glm::translate(model, {cx, cy, 0.0f});
+        model = glm::rotate(model,
+                            glm::radians((float)imgRotation),
+                            glm::vec3(0,0,1));
+        model = glm::scale(model,
+                        { flipX? -1.0f:1.0f,
+                            flipY? -1.0f:1.0f,
+                            1.0f });
+        model = glm::translate(model, {-cx, -cy, 0.0f});
+        glm::mat4 mvp = proj * model;
+
+        // 5) 渲染流线
+        glClearColor(0.1f,0.1f,0.1f,1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
         shader.use();
-        shader.setMat4("uMVP", proj);
-        int offset = 0;
+        shader.setMat4("uMVP", mvp);
         glBindVertexArray(streamlineVAO);
-
+        int offset = 0;
         for(auto count : lineVertexCounts){
-            // 每条线单独一笔
             glDrawArrays(GL_LINE_STRIP, offset, count);
             offset += count;
         }
-        // glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) streamlineVertCount);
         glBindVertexArray(0);
-        // 显示到屏幕，并处理事件
+
+        // 6) 渲染 ImGui 并 swap
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
-
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

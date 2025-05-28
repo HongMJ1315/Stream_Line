@@ -17,9 +17,9 @@ vector_field::vector_field(const std::string &filename){
         return;
     }
     file >> w >> h;
-    vectors.resize(h, std::vector<glm::vec2>(w));
-    for(int i = 0; i < h; ++i){
-        for(int j = 0; j < w; ++j){
+    vectors.resize(w, std::vector<glm::vec2>(h));
+    for(int i = 0; i < w; ++i){
+        for(int j = 0; j < h; ++j){
             glm::vec2 v;
             file >> v.x >> v.y;
             vectors[i][j] = v;
