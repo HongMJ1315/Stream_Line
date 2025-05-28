@@ -1,11 +1,65 @@
-#ifndef GLSL_H
-#define GLSL_H
-#include <GLinclude.h>
-/*------------------------------------------------------------------------------------------
- * Procedure to set up the vertex and fragment shader.
- * This proce4dure also create a program object containing the shader.
- */
-int set_shaders(char *VertexShaderFileName, char *FragmentShaderFileName);
+#pragma once
+#include <string>
+#include <iostream>
+#include <fstream>
+#include <cstdlib>
 
+#include "GLinclude.h"  // 包含 GLFW, glad, GL 类型定义等
 
-#endif
+class Shader{
+public:
+    Shader(const char *vertexPath, const char *fragmentPath);
+    ~Shader();
+
+    void use() const{ glUseProgram(ID); }
+
+    void setBool(const std::string &name, bool value)   const;
+    void setInt(const std::string &name, int value)    const;
+    void setFloat(const std::string &name, float value)  const;
+    void setVec2(const std::string &name, const glm::vec2 &v) const;
+    void setVec3(const std::string &name, const glm::vec3 &v) const;
+    void setMat4(const std::string &name, const glm::mat4 &m) const;
+
+    GLuint ID;
+
+private:
+    static int numShaders; 
+    char *read_source_codes(const char *filename) const{
+        FILE *fptr = fopen(filename, "r");
+        if(!fptr){
+            fprintf(stderr, " Source code file: %s doesn't exist.\n", filename);
+            exit(EXIT_FAILURE);
+        }
+        fseek(fptr, 0, SEEK_END);
+        unsigned int size = ftell(fptr);
+        rewind(fptr);
+
+        char *buffer = (char *) malloc(size + 1);
+        size = fread(buffer, sizeof(char), size, fptr);
+        buffer[size] = '\0';
+        fclose(fptr);
+        return buffer;
+    }
+
+    void print_shader_info_log(GLuint obj) const{
+        int status; char infoLog[1024];
+        glGetShaderiv(obj, GL_COMPILE_STATUS, &status);
+        if(status == GL_FALSE){
+            glGetShaderInfoLog(obj, 1024, NULL, infoLog);
+            fprintf(stderr, "Shader compile error: %s\n", infoLog);
+            exit(EXIT_FAILURE);
+        }
+        std::cerr << "Shader compiling is successful.\n";
+    }
+
+    void print_prog_info_log(GLuint obj) const{
+        int status; char infoLog[1024];
+        glGetProgramiv(obj, GL_LINK_STATUS, &status);
+        if(status == GL_FALSE){
+            glGetProgramInfoLog(obj, 1024, NULL, infoLog);
+            fprintf(stderr, "Shader link error: %s\n", infoLog);
+            exit(EXIT_FAILURE);
+        }
+        std::cerr << "Shader linking is successful.\n";
+    }
+};

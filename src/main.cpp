@@ -16,64 +16,92 @@
 #include "imgui_impl_opengl3.h"
 
 #include <future>
+#include "vector_field.h"
 
-int width = 800;
-int height = 600;
+int width = 800, height = 600;
 
-// -------------------- Camera 全域變數 --------------------
-glm::vec3 cameraPos   = glm::vec3(420.0f, -100.0f, -180.0f);
-glm::vec3 cameraFront = glm::vec3(-0.40f, 0.60f, 0.60f);
-glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
-float yaw   = -90.0f;      // 初始指向 -Z（使用 -90 度）
-float pitch = 0.0f;
-float lastX = width / 2.0f;
-float lastY = height / 2.0f;
-bool firstMouse = true;
+GLuint streamlineVAO = 0, streamlineVBO = 0;
+size_t streamlineVertCount = 0;
 
-float deltaTime = 0.0f;
-float lastFrame = 0.0f;
-// --------------------------------------------------------
+glm::mat4 proj;
 
-// 宣告一個 future 用來接收背景線程計算的結果（回傳兩個 surface）
-#define MOVE_SPEED 10.f
-#define ROTATE_SPEED 2.0f
+int    seedCount = 20;
+float  stepSize = 0.5f;
+int    maxSteps = 800;
 
-#define MODEL_LEN 256.0f
-#define MODEL_HEI 256.0f
-#define MODEL_WID 256.0f
+vector_field vf;
 
-
+std::vector<GLsizei> lineVertexCounts;
 
 
 void reshape(GLFWwindow *window, int w, int h){
-    width = w;
-    height = h;
-    glViewport(0, 0, width, height);
+    width = w;  height = h;
+    float winAspect = float(width) / float(height);
+    float fieldAspect = float(vf.getWidth()) / float(vf.getHeight());
+
+    if(winAspect > fieldAspect){
+        // 窗口比 field 更宽：上下留黑
+        int viewH = height;
+        int viewW = int(fieldAspect * viewH);
+        int xOff = (width - viewW) / 2;
+        glViewport(xOff, 0, viewW, viewH);
+    }
+    else{
+        // 窗口比 field 更高：左右留黑
+        int viewW = width;
+        int viewH = int(viewW / fieldAspect);
+        int yOff = (height - viewH) / 2;
+        glViewport(0, yOff, viewW, viewH);
+    }
+
+    // 投影就依然用原本 field 的 w,h，保证在 letter‐box 区域里不拉伸
+    proj = glm::ortho(0.0f, float(vf.getWidth()),
+        0.0f, float(vf.getHeight()),
+        -1.0f, 1.0f);
 }
 
-std::vector<unsigned char> data;
 
-GLuint VAO1, VAO2;
-GLsizei vertCount1, vertCount2;
+void rebuildStreamlines(const vector_field &vf){
+    std::vector<glm::vec2> allVerts;
+    allVerts.reserve(seedCount * maxSteps);
+
+    lineVertexCounts.clear();         // 清掉旧记录
+
+    for(int i = 0; i < seedCount; ++i){
+        float fx = (i + 0.5f) * vf.getWidth() / float(seedCount);
+        float fy = 0.5f * vf.getHeight();
+        auto line = integrateStreamline(vf, { fx, fy }, stepSize, maxSteps);
+
+        // 记录这一条有多少点
+        lineVertexCounts.push_back((GLsizei) line.size());
+
+        // 推进 VBO 用的数组
+        for(auto &p : line)
+            allVerts.push_back(p);
+    }
+
+    streamlineVertCount = allVerts.size();
+    if(streamlineVAO == 0){
+        glGenVertexArrays(1, &streamlineVAO);
+        glGenBuffers(1, &streamlineVBO);
+    }
+    glBindVertexArray(streamlineVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, streamlineVBO);
+    glBufferData(GL_ARRAY_BUFFER,
+        streamlineVertCount * sizeof(glm::vec2),
+        allVerts.data(),
+        GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
+        sizeof(glm::vec2), (void *) 0);
+    glBindVertexArray(0);
+}
 
 
 void init_data(){
-    std::ifstream file("Vector/1.vec");
-    if(!file.is_open()){
-        std::cerr << "Failed to open data file." << std::endl;
-        return;
-    }
-    int w, h;
-    file >> w >> h;
-    std::cout << "Data file opened successfully. Width: " << w << ", Height: " << h << std::endl;
-    std::vector<glm::vec2> vec;
-    for(int i = 0; i < w * h; ++i){
-        glm::vec2 v;
-        file >> v.x >> v.y;
-        vec.push_back(v);
-    }
-    std::cout << "Data loaded successfully. Total vectors: " << vec.size() << std::endl;
-    file.close();
+    vf = vector_field("Vector/1.vec");
+    rebuildStreamlines(vf);
+    std::cout << "set done" << std::endl;
 }
 
 
@@ -94,9 +122,9 @@ int main(int argc, char **argv){
     glfwMakeContextCurrent(window);
     glfwSetWindowSizeCallback(window, reshape);
 
-    
-    
-    if(!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)){
+
+
+    if(!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)){
         std::cout << "Failed to initialize GLAD" << std::endl;
         return -1;
     }
@@ -106,9 +134,9 @@ int main(int argc, char **argv){
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     std::cout << "GLFW version: " << glfwGetVersionString() << std::endl;
-    const GLubyte* glslVersion = glGetString(GL_SHADING_LANGUAGE_VERSION);
-    const GLubyte* renderer = glGetString(GL_RENDERER);
-    const GLubyte* version = glGetString(GL_VERSION);
+    const GLubyte *glslVersion = glGetString(GL_SHADING_LANGUAGE_VERSION);
+    const GLubyte *renderer = glGetString(GL_RENDERER);
+    const GLubyte *version = glGetString(GL_VERSION);
     std::cout << "GLSL version: " << glslVersion << std::endl;
     std::cout << "Renderer: " << renderer << std::endl;
     std::cout << "OpenGL version supported: " << version << std::endl;
@@ -116,84 +144,46 @@ int main(int argc, char **argv){
     // ImGui 初始化
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
+    ImGuiIO &io = ImGui::GetIO();
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 400");
 
-    // 讀取資料並生成兩個 iso_surface
     init_data();
 
     int shaderProgram = 0;
 
-    // 模型矩陣（如有需要可再調整位置）
-    glm::mat4 model = glm::mat4(1.0f);
+    Shader shader("shader/shader.vert", "shader/shader.frag");
 
-    // 光源 & 顏色
-    glm::vec3 lightPos(300.0f, 300.0f, 600.0f);
-    glm::vec3 lightColor(1.0f, 1.0f, 1.0f);
+    vector_field vf("Vector/1.vec");
 
-    glm::vec3 minDrawPos(-200.0f, -200.0f, -200.0f);
-    // 渲染主迴圈
-    float ISO1 = 200.f, ISO2 = 10.f;
+    proj = glm::ortho(0.0f, float(vf.getWidth()),
+        0.0f, float(vf.getHeight()),
+        -1.0f, 1.0f);
+
+    std::cout << vf.getHeight() << " " << vf.getWidth() << std::endl;
+
     while(!glfwWindowShouldClose(window)){
-        float currentFrame = glfwGetTime();
-        deltaTime = currentFrame - lastFrame;
-        lastFrame = currentFrame;
-
-        glfwPollEvents();
-
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // ImGui 畫面
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
-        {
-            ImGui::Begin("Input Window");
-            ImGui::End();
+        shader.use();
+        shader.setMat4("uMVP", proj);
+        int offset = 0;
+        glBindVertexArray(streamlineVAO);
+
+        for(auto count : lineVertexCounts){
+            // 每条线单独一笔
+            glDrawArrays(GL_LINE_STRIP, offset, count);
+            offset += count;
         }
-
-
-
-        glUseProgram(shaderProgram);
-
-        // 計算 view 與 projection 矩陣
-        glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-        glm::mat4 projection = glm::perspective(glm::radians(45.0f), (float) width / height, 0.1f, 2000.0f);
-
-        // 傳送矩陣給 shader
-        GLint modelLoc = glGetUniformLocation(shaderProgram, "model");
-        GLint viewLoc = glGetUniformLocation(shaderProgram, "view");
-        GLint projLoc = glGetUniformLocation(shaderProgram, "projection");
-        glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
-        glUniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
-        glUniformMatrix4fv(projLoc, 1, GL_FALSE, glm::value_ptr(projection));
-
-        GLint lightPosLoc = glGetUniformLocation(shaderProgram, "lightPos");
-        GLint viewPosLoc = glGetUniformLocation(shaderProgram, "viewPos");
-        GLint lightColorLoc = glGetUniformLocation(shaderProgram, "lightColor");
-        GLint objectColorLoc = glGetUniformLocation(shaderProgram, "objectColor");
-        glUniform3fv(lightPosLoc, 1, glm::value_ptr(lightPos));
-        glUniform3fv(viewPosLoc, 1, glm::value_ptr(cameraPos));
-        glUniform3fv(lightColorLoc, 1, glm::value_ptr(lightColor));
-
-        GLint minDrawPosLoc = glGetUniformLocation(shaderProgram, "minDrawPos");
-        glUniform3fv(minDrawPosLoc, 1, glm::value_ptr(minDrawPos));
-
-
-
-        ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
+        // glDrawArrays(GL_LINE_STRIP, 0, (GLsizei) streamlineVertCount);
+        glBindVertexArray(0);
+        // 显示到屏幕，并处理事件
         glfwSwapBuffers(window);
+        glfwPollEvents();
     }
 
-    // 清理
-    glDeleteVertexArrays(1, &VAO1);
-    glDeleteVertexArrays(1, &VAO2);
-    // 如果你有另外存 VBO_pos, VBO_norm，要在這裡也一起刪除
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

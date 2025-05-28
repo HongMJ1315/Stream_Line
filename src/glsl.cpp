@@ -1,124 +1,65 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <iostream>
-#include <fstream>
-
 #include "glsl.h"
-//Global varibles: the program object IDs and the number of program objects created by us,
-GLuint   myProgObjID;
-int          numProgObj = 0;
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
-/*-----------------------------------------------------------------------
- * Procedure to read the source codes of a shader.
- *  filename: name of the source code file (text file).
- * Return a string containg the source codes.
- */
-char *read_source_codes(char *filename){
-    FILE *fptr = fopen(filename, "r");
-    char *buffer = 0;
-    unsigned int  size;
+int Shader::numShaders = 0;
 
-    if(fptr == NULL){
-        fprintf(stderr, " Source code file: %s doesn't exist. \n", filename);
-        exit(0);
-    }
-    else{
-        fseek(fptr, 0, SEEK_END);
-        size = ftell(fptr);
-        buffer = (char *) malloc(size + 1);
-        //move the file pointer to the head of the source code file.
-        rewind(fptr);
-        //Read the source code.
-        size = fread(buffer, sizeof(char), size, fptr);
-        buffer[size] = '\0';
-        fclose(fptr);
-    }
-    return buffer;
+Shader::Shader(const char *vertexPath, const char *fragmentPath){
+    ID = glCreateProgram();
+
+    GLuint vert = glCreateShader(GL_VERTEX_SHADER);
+    GLuint frag = glCreateShader(GL_FRAGMENT_SHADER);
+
+    char *vSrc = read_source_codes(const_cast<char *>(vertexPath));
+    char *fSrc = read_source_codes(const_cast<char *>(fragmentPath));
+
+    std::cerr << "Vertex Shader Source:\n" << vSrc << "\n";
+    glShaderSource(vert, 1, &vSrc, NULL);
+    glCompileShader(vert);
+    print_shader_info_log(vert);
+
+    std::cerr << "Fragment Shader Source:\n" << fSrc << "\n";
+    glShaderSource(frag, 1, &fSrc, NULL);
+    glCompileShader(frag);
+    print_shader_info_log(frag);
+
+    free(vSrc);
+    free(fSrc);
+
+    glAttachShader(ID, vert);
+    glAttachShader(ID, frag);
+    glLinkProgram(ID);
+    print_prog_info_log(ID);
+
+    glDeleteShader(vert);
+    glDeleteShader(frag);
+
+    numShaders++;
+    std::cout << "Created Shader program ID = " << ID
+        << "  (total shaders: " << numShaders << ")\n";
 }
 
-/*-----------------------------------------------------------------------------------
- * Local procedure to check compile errors.
- *   obj: shader ID.
- */
-void print_shader_info_log(GLenum obj){
-    int     status;
-    char   infoLog[1024];
-
-    glGetShaderiv(obj, GL_COMPILE_STATUS, &status);
-    if(status == GL_FALSE){
-        glGetShaderInfoLog(obj, 1024, NULL, infoLog);
-        fprintf(stderr, "Shader compile error: %s\n", infoLog);
-        exit(-1);
-    }
-    fprintf(stderr, "Shader compiling is successful. \n");
+Shader::~Shader(){
+    glDeleteProgram(ID);
+    numShaders--;
 }
 
-/*-----------------------------------------------------------------------------------
- * Local procedure to check link errors.
- *   obj: program object ID.
- */
-void print_prog_info_log(GLenum obj){
-    int     status;
-    char   infoLog[1024];
-
-    glGetProgramiv(obj, GL_LINK_STATUS, &status);
-    if(status == GL_FALSE){
-        glGetProgramInfoLog(obj, 1024, NULL, infoLog);
-        fprintf(stderr, "Shader link error: %s\n", infoLog);
-        exit(-1);
-    }
-    fprintf(stderr, "Shader linking is successful. \n");
+void Shader::setBool(const std::string &name, bool value) const{
+    glUniform1i(glGetUniformLocation(ID, name.c_str()), (int) value);
 }
-
-/*---------------------------------------------------------------------------------------------------
- * A global procedure declared in "GLSLSetup.h".
- *  1. Create vertex shadre, fragment shader, program object
- *  2. Fetch the source codes of the shaders.
- *  3. Compile, attach, and link the shaders.
- * Keep the program object ID in  myProgObjID[0] and return.
- */
-int set_shaders(char *vertexShaderFileName, char *fragmentShaderFileName){
-    GLuint    vertexShader = 0, fragmentShader = 0;
-    char *VSsourceCodes, *FSsourceCodes;
-
-
-    //create a program object
-    myProgObjID = glCreateProgram();
-
-    //create the shaders
-    vertexShader = glCreateShader(GL_VERTEX_SHADER);
-    fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-
-    //read the source codes of the shaders
-    VSsourceCodes = read_source_codes(vertexShaderFileName);
-    FSsourceCodes = read_source_codes(fragmentShaderFileName);
-
-    //Print out the source codes for error checking.
-    fprintf(stderr, "Vertex   Shader Source : [\n%s\n]\n", VSsourceCodes);
-    glShaderSource(vertexShader, 1, (char **) &VSsourceCodes, NULL);
-    glCompileShader(vertexShader);
-    print_shader_info_log(vertexShader);
-
-    fprintf(stderr, "Fragment ShaderSources: [\n%s\n]\n", FSsourceCodes);
-    glShaderSource(fragmentShader, 1, (char **) &FSsourceCodes, NULL);
-    glCompileShader(fragmentShader);
-    print_shader_info_log(fragmentShader);
-    //Load the source codes into the shaders
-
-    //attach shaders to program
-    glAttachShader(myProgObjID, vertexShader);
-    glAttachShader(myProgObjID, fragmentShader);
-
-    //Link the shaders
-    glLinkProgram(myProgObjID);
-    //Check link errors
-    print_prog_info_log(myProgObjID);
-
-    //Replace the default program object with ours.
-    // glUseProgram(myProgObjID);
-    numProgObj = 1;
-    std::cout << "Program ID" << ((unsigned int) myProgObjID) << std::endl;
-    return myProgObjID;
-
+void Shader::setInt(const std::string &name, int value) const{
+    glUniform1i(glGetUniformLocation(ID, name.c_str()), value);
 }
-
+void Shader::setFloat(const std::string &name, float value) const{
+    glUniform1f(glGetUniformLocation(ID, name.c_str()), value);
+}
+void Shader::setVec2(const std::string &name, const glm::vec2 &v) const{
+    glUniform2fv(glGetUniformLocation(ID, name.c_str()), 1, glm::value_ptr(v));
+}
+void Shader::setVec3(const std::string &name, const glm::vec3 &v) const{
+    glUniform3fv(glGetUniformLocation(ID, name.c_str()), 1, glm::value_ptr(v));
+}
+void Shader::setMat4(const std::string &name, const glm::mat4 &m) const{
+    glUniformMatrix4fv(glGetUniformLocation(ID, name.c_str()),
+        1, GL_FALSE, glm::value_ptr(m));
+}
