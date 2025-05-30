@@ -18,30 +18,30 @@ vector_field::vector_field(const std::string &filename){
     }
     file >> w >> h;
     vectors.resize(w, std::vector<glm::vec2>(h));
-    for(int i = 0; i < w; ++i){
-        for(int j = 0; j < h; ++j){
+    gradients.resize(w, std::vector<glm::vec2>(h));
+    for(int i = 0; i < w; i++){
+        for(int j = 0; j < h; j++){
             glm::vec2 v;
             file >> v.x >> v.y;
             vectors[i][j] = v;
         }
     }
     file.close();
-    compute_gradients(); // Compute gradients after loading data
+    compute_gradients();
 }
 
 vector_field::vector_field(){};
 
 glm::vec2 vector_field::sample_value(int x, int y) const{
-    // Ensure x and y are within bounds
     if(x < 0 || y < 0 || y >= vectors.size() || x >= vectors[y].size()){
-        return glm::vec2(0.0f, 0.0f); // Out of bounds, return zero vector
+        return glm::vec2(0.0f, 0.0f);
     }
-    return vectors[y][x]; // Return the vector at (x, y)
+    return vectors[y][x];
 }
 
 glm::vec2 vector_field::compute_point_gradient(int x, int y){
-    int dx = 1; // Sample offset in x direction
-    int dy = 1; // Sample offset in y direction
+    int dx = 1;
+    int dy = 1;
     glm::vec2 v1 = sample_value(x + dx, y + dy);
     glm::vec2 v2 = sample_value(x - dx, y - dy);
     glm::vec2 v3 = sample_value(x + dx, y - dy);
@@ -50,33 +50,26 @@ glm::vec2 vector_field::compute_point_gradient(int x, int y){
     glm::vec2 gradient;
     gradient.x = (v1.x - v2.x + v3.x - v4.x) / (4 * dx);
     gradient.y = (v1.y - v2.y + v3.y - v4.y) / (4 * dy);
-    // Normalize the gradient
+
     float length = glm::length(gradient);
     if(length > 0.0f){
-        gradient /= length; // Normalize to unit vector
-
+        gradient /= length;
     }
     else{
-        gradient = glm::vec2(0.0f, 0.0f); // If length is zero, return zero vector
+        gradient = glm::vec2(0.0f, 0.0f);
     }
-    max_gradient = std::max(max_gradient, glm::length(gradient)); // Update max gradient
+    max_gradient = std::max(max_gradient, glm::length(gradient));
     if(min_gradient == 0.0f || glm::length(gradient) < min_gradient){
-        min_gradient = glm::length(gradient); // Update min gradient
+        min_gradient = glm::length(gradient);
     }
-    return gradient; // Return the computed gradient
+    return gradient;
 }
 
 void vector_field::compute_gradients(){
-    for(int y = 0; y < vectors.size(); ++y){
-        for(int x = 0; x < vectors[y].size(); ++x){
-            glm::vec2 gradient = compute_point_gradient(x, y);
-            float magnitude = glm::length(gradient);
-            if(magnitude > max_gradient){
-                max_gradient = magnitude;
-            }
-            if(magnitude < min_gradient || min_gradient == 0.0f){
-                min_gradient = magnitude;
-            }
+    for(int i = 0; i < vectors.size(); i++){
+        for(int j = 0; j < vectors[i].size(); j++){
+            glm::vec2 gradient = compute_point_gradient(i, j);
+            gradients[i][j] = gradient;
         }
     }
 }
@@ -95,8 +88,17 @@ glm::vec2 vector_field::sampleBilinear(float fx, float fy) const{
 }
 
 
-int vector_field::getHeight() const{ return h; }
-int vector_field::getWidth() const{ return w; }
+const int vector_field::getHeight() const{ return h; }
+const int vector_field::getWidth() const{ return w; }
+const std::vector<std::vector<glm::vec2>> &vector_field::getGradients() const{
+    return gradients;
+}
+const glm::vec2 vector_field::get_min_max() const{
+    return glm::vec2(min_gradient, max_gradient);
+}
+const std::vector<std::vector<glm::vec2>> &vector_field::get_vector() const{
+    return vectors;
+}
 
 std::vector<glm::vec2> integrateStreamline(const vector_field &vf, glm::vec2 seed,
     float h, int maxSteps){

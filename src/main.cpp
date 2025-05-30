@@ -16,24 +16,27 @@
 #include "imgui_impl_opengl3.h"
 
 #include <future>
-#include "vector_field.h"
+#include "lic.h"
 
 int width = 800, height = 600;
 
 GLuint streamlineVAO = 0, streamlineVBO = 0;
+GLuint quadVAO = 0, quadVBO = 0;
 size_t streamlineVertCount = 0;
+GLuint noiseTex = 0, vectorTex = 0;
 
 glm::mat4 proj;
 
 int    seedCount = 20;
-float  stepSize = 0.5f;
+float  stepSize = 0.01f;
 int    maxSteps = 100;
-int seedCols = 20;  // 水平种子数量
-int seedRows = 20;  // 垂直种子数量
+int seedCols = 20;
+int seedRows = 20;
 
 vector_field vf;
 
 std::vector<GLsizei> lineVertexCounts;
+std::vector<float> seedGradients;
 
 
 void reshape(GLFWwindow *window, int w, int h){
@@ -42,21 +45,18 @@ void reshape(GLFWwindow *window, int w, int h){
     float fieldAspect = float(vf.getWidth()) / float(vf.getHeight());
 
     if(winAspect > fieldAspect){
-        // 窗口比 field 更宽：上下留黑
         int viewH = height;
         int viewW = int(fieldAspect * viewH);
         int xOff = (width - viewW) / 2;
         glViewport(xOff, 0, viewW, viewH);
     }
     else{
-        // 窗口比 field 更高：左右留黑
         int viewW = width;
         int viewH = int(viewW / fieldAspect);
         int yOff = (height - viewH) / 2;
         glViewport(0, yOff, viewW, viewH);
     }
 
-    // 投影就依然用原本 field 的 w,h，保证在 letter‐box 区域里不拉伸
     proj = glm::ortho(0.0f, float(vf.getWidth()),
         0.0f, float(vf.getHeight()),
         -1.0f, 1.0f);
@@ -68,26 +68,31 @@ void rebuildStreamlines(const vector_field &vf){
     allVerts.reserve(seedCols * seedRows * maxSteps);
 
     lineVertexCounts.clear();
+    seedGradients.clear();                     // ← 清空旧数据
+    const auto &G = vf.getGradients();         // 取引用
 
-    for(int j = 0; j < seedRows; ++j){
+    for(int j = 0; j < seedRows; j++){
         float fy = (j + 0.5f) * vf.getHeight() / float(seedRows);
-        for(int i = 0; i < seedCols; ++i){
-            float fx = (i + 0.5f) * vf.getWidth()  / float(seedCols);
+        for(int i = 0; i < seedCols; i++){
+            float fx = (i + 0.5f) * vf.getWidth() / float(seedCols);
 
-            // RK4 积分
-            auto line = integrateStreamline(vf, { fx, fy },
-                                            stepSize, maxSteps);
-            lineVertexCounts.push_back((GLsizei)line.size());
-            for(auto &p : line)
-                allVerts.push_back(p);
+            // 1) RK4 积分，生成流线顶点
+            auto line = integrateStreamline(vf, { fx, fy }, stepSize, maxSteps);
+            lineVertexCounts.push_back((GLsizei) line.size());
+            for(auto &p : line)  allVerts.push_back(p);
+
+            // 2) 记录这个 seed 点的梯度幅值
+            int gi = glm::clamp(int(fy), 0, vf.getHeight() - 1);
+            int gj = glm::clamp(int(fx), 0, vf.getWidth() - 1);
+            float mag = glm::length(G[gi][gj]);
+            seedGradients.push_back(mag);
         }
     }
 
-    // 上传 VBO/VAO
     streamlineVertCount = allVerts.size();
     if(streamlineVAO == 0){
         glGenVertexArrays(1, &streamlineVAO);
-        glGenBuffers     (1, &streamlineVBO);
+        glGenBuffers(1, &streamlineVBO);
     }
     glBindVertexArray(streamlineVAO);
     glBindBuffer(GL_ARRAY_BUFFER, streamlineVBO);
@@ -97,19 +102,26 @@ void rebuildStreamlines(const vector_field &vf){
         GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
-                          sizeof(glm::vec2), (void*)0);
+        sizeof(glm::vec2), (void *) 0);
     glBindVertexArray(0);
 }
 
 void init_data(){
     vf = vector_field("Vector/1.vec");
+    seedCols = vf.getWidth();
+    seedRows = vf.getHeight();
+    std::pair<GLuint, GLuint> vaovbo = initLICQuad(vf);
+    quadVAO = vaovbo.first;
+    quadVBO = vaovbo.second;
+    noiseTex = makeNoiseTex(512);
+    vectorTex = makeVectorTex(vf);
+
     rebuildStreamlines(vf);
     std::cout << "set done" << std::endl;
 }
 
 
 int main(int argc, char **argv){
-    // 初始化
     glutInit(&argc, argv);
     if(!glfwInit()){
         return -1;
@@ -145,7 +157,6 @@ int main(int argc, char **argv){
     std::cout << "Renderer: " << renderer << std::endl;
     std::cout << "OpenGL version supported: " << version << std::endl;
 
-    // ImGui 初始化
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
@@ -158,92 +169,131 @@ int main(int argc, char **argv){
     int shaderProgram = 0;
 
     Shader shader("shader/shader.vert", "shader/shader.frag");
-
+    Shader licShader("shader/lic.vert", "shader/lic.frag");
 
     proj = glm::ortho(0.0f, float(vf.getHeight()),
         0.0f, float(vf.getWidth()),
         -1.0f, 1.0f);
 
     std::cout << vf.getHeight() << " " << vf.getWidth() << std::endl;
-    int imgRotation = 0;     // 角度（度）
-    bool  flipX       = false;    // 水平翻转
-    bool  flipY       = false;    // 垂直翻转
+    int imgRotation = 0;
+    bool  flipX = false;
+    bool  flipY = false;
+    bool show_lic = true;
+    bool show_sl = true;
 
+    glm::vec2 mm = vf.get_min_max();
+    float gmin = mm.x, gmax = mm.y;
 
     while(!glfwWindowShouldClose(window)){
-        // 1) 新 frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // 2) 参数面板
-        // 我们把“生成流线”的参数放在一个单独窗口里
-        static int prevCols   = seedCols;
-        static int prevRows   = seedRows;
+        static int prevCols = seedCols;
+        static int prevRows = seedRows;
         static float prevStep = stepSize;
-        static int prevMax    = maxSteps;
+        static int prevMax = maxSteps;
 
         ImGui::Begin("Streamline Parameters");
-        // 水平、垂直种子数
         ImGui::SliderInt("Seed Columns", &seedCols, 1, 100);
-        ImGui::SliderInt("Seed Rows",    &seedRows, 1, 100);
-        // 最大积分步数
-        ImGui::SliderInt("Max Steps",    &maxSteps, 10, 2000);
-        // RK4 步长
-        ImGui::SliderFloat("Step Size",  &stepSize, 0.01f, 5.0f);
+        ImGui::SliderInt("Seed Rows", &seedRows, 1, 100);
+        ImGui::SliderInt("Max Steps", &maxSteps, 10, 2000);
+        ImGui::SliderFloat("Step Size", &stepSize, 0.01f, 5.0f);
 
-        // 如果任一参数变化，就重新 build
-        if (seedCols  != prevCols   ||
-            seedRows  != prevRows   ||
-            stepSize  != prevStep   ||
-            maxSteps  != prevMax)
-        {
+        if(seedCols != prevCols ||
+            seedRows != prevRows ||
+            stepSize != prevStep ||
+            maxSteps != prevMax){
             prevCols = seedCols;
             prevRows = seedRows;
             prevStep = stepSize;
-            prevMax  = maxSteps;
+            prevMax = maxSteps;
             rebuildStreamlines(vf);
         }
         ImGui::End();
 
-        // 3) Transform 面板（如果你还需要旋转/翻转的话）
         ImGui::Begin("Transform");
-        if(ImGui::Button("Rotate 90°")) {
+        if(ImGui::Button("Rotate 90°")){
             imgRotation = (imgRotation - 90 + 360) % 360;
         }
         ImGui::Checkbox("Flip Horizontal", &flipX);
-        ImGui::Checkbox("Flip Vertical",   &flipY);
+        ImGui::Checkbox("Flip Vertical", &flipY);
+        ImGui::Checkbox("Show LIC", &show_lic);
+        ImGui::Checkbox("Show Steam Line", &show_sl);
         ImGui::End();
 
-        // 4) 构造 Model 和 MVP（同你原本那段）
+
         glm::mat4 model(1.0f);
         float cx = vf.getWidth() * 0.5f;
-        float cy = vf.getHeight()* 0.5f;
-        model = glm::translate(model, {cx, cy, 0.0f});
+        float cy = vf.getHeight() * 0.5f;
+        model = glm::translate(model, { cx, cy, 0.0f });
         model = glm::rotate(model,
-                            glm::radians((float)imgRotation),
-                            glm::vec3(0,0,1));
+            glm::radians((float) imgRotation),
+            glm::vec3(0, 0, 1));
         model = glm::scale(model,
-                        { flipX? -1.0f:1.0f,
-                            flipY? -1.0f:1.0f,
-                            1.0f });
-        model = glm::translate(model, {-cx, -cy, 0.0f});
+            { flipX ? -1.0f : 1.0f,
+                flipY ? -1.0f : 1.0f,
+                1.0f });
+        model = glm::translate(model, { -cx, -cy, 0.0f });
         glm::mat4 mvp = proj * model;
 
-        // 5) 渲染流线
-        glClearColor(0.1f,0.1f,0.1f,1.0f);
+        // LIC
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glClearColor(0.7f, 0.7f, 0.7f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        shader.use();
-        shader.setMat4("uMVP", mvp);
-        glBindVertexArray(streamlineVAO);
-        int offset = 0;
-        for(auto count : lineVertexCounts){
-            glDrawArrays(GL_LINE_STRIP, offset, count);
-            offset += count;
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+
+        if(show_lic){
+            licShader.use();
+            licShader.setMat4("uMVP", mvp);
+            glBindVertexArray(quadVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glBindVertexArray(0);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, noiseTex);
+            licShader.setInt("uNoise", 0);
+
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, vectorTex);
+            licShader.setInt("uVectorField", 1);
+
+            licShader.setFloat("uStepSize", 1.0f / float(std::max(vf.getWidth(), vf.getHeight())));
+            licShader.setInt("uNumSteps", 20);
+
+            glBindVertexArray(quadVAO);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+            glBindVertexArray(0);
+        }
+
+        // Steam Line
+        glDepthMask(GL_TRUE);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST);
+        if(show_sl){
+            shader.use();
+            shader.setMat4("uMVP", mvp);
+            glBindVertexArray(streamlineVAO);
+            int offset = 0;
+            for(size_t k = 0; k < lineVertexCounts.size(); ++k){
+                float t = (seedGradients[k] - gmin) / (gmax - gmin);
+                t = glm::clamp(t, 0.0f, 1.0f);
+
+                glm::vec3 col = glm::mix(
+                    glm::vec3(0.0f, 0.0f, 1.0f),  // 蓝
+                    glm::vec3(1.0f, 0.0f, 0.0f),  // 红
+                    t
+                );
+                shader.setVec3("uColor", col);
+
+                glDrawArrays(GL_LINE_STRIP, offset, lineVertexCounts[k]);
+                offset += lineVertexCounts[k];
+            }
         }
         glBindVertexArray(0);
 
-        // 6) 渲染 ImGui 并 swap
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(window);
