@@ -13,17 +13,17 @@ public:
 
     void use() const{ glUseProgram(ID); }
 
-    void setBool(const std::string &name, bool value)   const;
-    void setInt(const std::string &name, int value)    const;
-    void setFloat(const std::string &name, float value)  const;
-    void setVec2(const std::string &name, const glm::vec2 &v) const;
-    void setVec3(const std::string &name, const glm::vec3 &v) const;
-    void setMat4(const std::string &name, const glm::mat4 &m) const;
+    void set_bool(const std::string &name, bool value)   const;
+    void set_int(const std::string &name, int value)    const;
+    void set_float(const std::string &name, float value)  const;
+    void set_vec2(const std::string &name, const glm::vec2 &v) const;
+    void set_vec3(const std::string &name, const glm::vec3 &v) const;
+    void set_mat4(const std::string &name, const glm::mat4 &m) const;
 
     GLuint ID;
 
 private:
-    static int numShaders; 
+    static int numShaders;
     char *read_source_codes(const char *filename) const{
         FILE *fptr = fopen(filename, "r");
         if(!fptr){

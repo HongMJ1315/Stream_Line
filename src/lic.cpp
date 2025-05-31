@@ -2,7 +2,7 @@
 #include <vector>
 #include <random>
 
-GLuint makeNoiseTex(int size = 512){
+GLuint build_noise_tex(int size = 512){
     std::vector<GLubyte> data(size * size);
     std::mt19937 rng(12345);
     std::uniform_int_distribution<> dist(0, 255);
@@ -18,8 +18,8 @@ GLuint makeNoiseTex(int size = 512){
     return tex;
 }
 
-GLuint makeVectorTex(const vector_field &vf){
-    int W = vf.getWidth(), H = vf.getHeight();
+GLuint build_vector_tex(const vector_field &vf){
+    int W = vf.get_width(), H = vf.get_height();
     std::vector<glm::vec2> buf(W * H);
     auto vect = vf.get_vector();
     for(int j = 0; j < H; j++)
@@ -35,16 +35,16 @@ GLuint makeVectorTex(const vector_field &vf){
     return tex;
 }
 
-std::pair<GLuint, GLuint> initLICQuad( vector_field &vf){
+std::pair<GLuint, GLuint> init_lic_quad( vector_field &vf){
     // 每顶点： x,y,u,v
     float quadVerts[] = {
       0, 0,               0, 0,
-      vf.getWidth(), 0,               1, 0,
-      vf.getWidth(), vf.getHeight(),               1, 1,
+      vf.get_width(), 0,               1, 0,
+      vf.get_width(), vf.get_height(),               1, 1,
 
       0, 0,               0, 0,
-      vf.getWidth(), vf.getHeight(),               1, 1,
-      0, vf.getHeight(),               0, 1,
+      vf.get_width(), vf.get_height(),               1, 1,
+      0, vf.get_height(),               0, 1,
     };
     GLuint vao, vbo;
     glGenVertexArrays(1, &vao);

@@ -1,6 +1,6 @@
 #include"GLinclude.h"
 #include "vector_field.h"
 
-GLuint makeNoiseTex(int);
-GLuint makeVectorTex(const vector_field &);
-std::pair<GLuint, GLuint> initLICQuad(vector_field &);
+GLuint build_noise_tex(int);
+GLuint build_vector_tex(const vector_field &);
+std::pair<GLuint, GLuint> init_lic_quad(vector_field &);

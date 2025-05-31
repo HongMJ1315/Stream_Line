@@ -74,7 +74,7 @@ void vector_field::compute_gradients(){
     }
 }
 
-glm::vec2 vector_field::sampleBilinear(float fx, float fy) const{
+glm::vec2 vector_field::sample_bilinear(float fx, float fy) const{
     int x0 = int(floor(fx)), y0 = int(floor(fy));
     int x1 = x0 + 1, y1 = y0 + 1;
     float sx = fx - x0, sy = fy - y0;
@@ -88,9 +88,9 @@ glm::vec2 vector_field::sampleBilinear(float fx, float fy) const{
 }
 
 
-const int vector_field::getHeight() const{ return h; }
-const int vector_field::getWidth() const{ return w; }
-const std::vector<std::vector<glm::vec2>> &vector_field::getGradients() const{
+const int vector_field::get_height() const{ return h; }
+const int vector_field::get_width() const{ return w; }
+const std::vector<std::vector<glm::vec2>> &vector_field::get_gradients() const{
     return gradients;
 }
 const glm::vec2 vector_field::get_min_max() const{
@@ -100,7 +100,7 @@ const std::vector<std::vector<glm::vec2>> &vector_field::get_vector() const{
     return vectors;
 }
 
-std::vector<glm::vec2> integrateStreamline(const vector_field &vf, glm::vec2 seed,
+std::vector<glm::vec2> integrate_streamline(const vector_field &vf, glm::vec2 seed,
     float h, int maxSteps){
     std::vector<glm::vec2> pts;
     pts.reserve(maxSteps);
@@ -108,17 +108,17 @@ std::vector<glm::vec2> integrateStreamline(const vector_field &vf, glm::vec2 see
     pts.push_back(p);
 
     for(int i = 0; i < maxSteps; ++i){
-        glm::vec2 k1 = vf.sampleBilinear(p.x, p.y);
-        glm::vec2 k2 = vf.sampleBilinear(p.x + 0.5f * h * k1.x,
+        glm::vec2 k1 = vf.sample_bilinear(p.x, p.y);
+        glm::vec2 k2 = vf.sample_bilinear(p.x + 0.5f * h * k1.x,
             p.y + 0.5f * h * k1.y);
-        glm::vec2 k3 = vf.sampleBilinear(p.x + 0.5f * h * k2.x,
+        glm::vec2 k3 = vf.sample_bilinear(p.x + 0.5f * h * k2.x,
             p.y + 0.5f * h * k2.y);
-        glm::vec2 k4 = vf.sampleBilinear(p.x + h * k3.x,
+        glm::vec2 k4 = vf.sample_bilinear(p.x + h * k3.x,
             p.y + h * k3.y);
         glm::vec2 dp = (k1 + 2.0f * k2 + 2.0f * k3 + k4) * (h / 6.0f);
         p += dp;
         if(p.x < 0 || p.y < 0 ||
-            p.x >= vf.getWidth() || p.y >= vf.getHeight())
+            p.x >= vf.get_width() || p.y >= vf.get_height())
             break;
         pts.push_back(p);
     }

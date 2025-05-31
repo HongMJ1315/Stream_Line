@@ -20,85 +20,83 @@
 
 int width = 800, height = 600;
 
-GLuint streamlineVAO = 0, streamlineVBO = 0;
-GLuint quadVAO = 0, quadVBO = 0;
-size_t streamlineVertCount = 0;
-GLuint noiseTex = 0, vectorTex = 0;
+GLuint streamline_vao = 0, streamline_vbo = 0;
+GLuint quad_vao = 0, quad_vbo = 0;
+
+size_t streamline_vert_cnt = 0;
+GLuint noise_tex = 0, vect_tex = 0;
 
 glm::mat4 proj;
 
-int    seedCount = 20;
-float  stepSize = 0.01f;
-int    maxSteps = 100;
-int seedCols = 20;
-int seedRows = 20;
+float  step_size = 0.01f;
+int    max_steps = 100;
+int seed_cols = 20;
+int seed_rows = 20;
 
 vector_field vf;
 
-std::vector<GLsizei> lineVertexCounts;
-std::vector<float> seedGradients;
+std::vector<GLsizei> line_vert_cnt;
+std::vector<float> seed_grad;
 
 
 void reshape(GLFWwindow *window, int w, int h){
     width = w;  height = h;
-    float winAspect = float(width) / float(height);
-    float fieldAspect = float(vf.getWidth()) / float(vf.getHeight());
+    float win_aspect = float(width) / float(height);
+    float field_aspect = float(vf.get_width()) / float(vf.get_height());
 
-    if(winAspect > fieldAspect){
+    if(win_aspect > field_aspect){
         int viewH = height;
-        int viewW = int(fieldAspect * viewH);
-        int xOff = (width - viewW) / 2;
-        glViewport(xOff, 0, viewW, viewH);
+        int viewW = int(field_aspect * viewH);
+        int x_off = (width - viewW) / 2;
+        glViewport(x_off, 0, viewW, viewH);
     }
     else{
-        int viewW = width;
-        int viewH = int(viewW / fieldAspect);
-        int yOff = (height - viewH) / 2;
-        glViewport(0, yOff, viewW, viewH);
+        int view_w = width;
+        int view_h = int(view_w / field_aspect);
+        int y_off = (height - view_h) / 2;
+        glViewport(0, y_off, view_w, view_h);
     }
 
-    proj = glm::ortho(0.0f, float(vf.getWidth()),
-        0.0f, float(vf.getHeight()),
+    proj = glm::ortho(0.0f, float(vf.get_width()),
+        0.0f, float(vf.get_height()),
         -1.0f, 1.0f);
 }
 
 
-void rebuildStreamlines(const vector_field &vf){
-    std::vector<glm::vec2> allVerts;
-    allVerts.reserve(seedCols * seedRows * maxSteps);
+void rebuild_streamlines(const vector_field &vf){
+    std::vector<glm::vec2> all_verts;
+    all_verts.reserve(seed_cols * seed_rows * max_steps);
 
-    lineVertexCounts.clear();
-    seedGradients.clear();                     // ← 清空旧数据
-    const auto &G = vf.getGradients();         // 取引用
+    line_vert_cnt.clear();
+    seed_grad.clear();                     // ← 清空旧数据
+    const auto &G = vf.get_gradients();         // 取引用
 
-    for(int j = 0; j < seedRows; j++){
-        float fy = (j + 0.5f) * vf.getHeight() / float(seedRows);
-        for(int i = 0; i < seedCols; i++){
-            float fx = (i + 0.5f) * vf.getWidth() / float(seedCols);
+    for(int j = 0; j < seed_rows; j++){
+        float fy = (j + 0.5f) * vf.get_height() / float(seed_rows);
+        for(int i = 0; i < seed_cols; i++){
+            float fx = (i + 0.5f) * vf.get_width() / float(seed_cols);
 
-            // 1) RK4 积分，生成流线顶点
-            auto line = integrateStreamline(vf, { fx, fy }, stepSize, maxSteps);
-            lineVertexCounts.push_back((GLsizei) line.size());
-            for(auto &p : line)  allVerts.push_back(p);
+            auto line = integrate_streamline(vf, { fx, fy }, step_size, max_steps);
+            line_vert_cnt.push_back((GLsizei) line.size());
+            for(auto &p : line)  all_verts.push_back(p);
 
-            // 2) 记录这个 seed 点的梯度幅值
-            int gi = glm::clamp(int(fy), 0, vf.getHeight() - 1);
-            int gj = glm::clamp(int(fx), 0, vf.getWidth() - 1);
+            int gi = glm::clamp(int(fy), 0, vf.get_height() - 1);
+            int gj = glm::clamp(int(fx), 0, vf.get_width() - 1);
             float mag = glm::length(G[gi][gj]);
-            seedGradients.push_back(mag);
+            seed_grad.push_back(mag);
         }
     }
 
-    streamlineVertCount = allVerts.size();
-    if(streamlineVAO == 0){
-        glGenVertexArrays(1, &streamlineVAO);
-        glGenBuffers(1, &streamlineVBO);
+    streamline_vert_cnt = all_verts.size();
+    if(streamline_vao == 0){
+        glGenVertexArrays(1, &streamline_vao);
+        glGenBuffers(1, &streamline_vbo);
     }
-    glBindVertexArray(streamlineVAO);
-    glBindBuffer(GL_ARRAY_BUFFER, streamlineVBO);
+    glBindVertexArray(streamline_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, streamline_vbo);
     glBufferData(GL_ARRAY_BUFFER,
-        streamlineVertCount * sizeof(glm::vec2),
-        allVerts.data(),
+        streamline_vert_cnt * sizeof(glm::vec2),
+        all_verts.data(),
         GL_STATIC_DRAW);
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE,
@@ -107,16 +105,16 @@ void rebuildStreamlines(const vector_field &vf){
 }
 
 void init_data(){
-    vf = vector_field("Vector/1.vec");
-    seedCols = vf.getWidth();
-    seedRows = vf.getHeight();
-    std::pair<GLuint, GLuint> vaovbo = initLICQuad(vf);
-    quadVAO = vaovbo.first;
-    quadVBO = vaovbo.second;
-    noiseTex = makeNoiseTex(512);
-    vectorTex = makeVectorTex(vf);
+    vf = vector_field("Vector/9.vec");
+    seed_cols = vf.get_width();
+    seed_rows = vf.get_height();
+    std::pair<GLuint, GLuint> vaovbo = init_lic_quad(vf);
+    quad_vao = vaovbo.first;
+    quad_vbo = vaovbo.second;
+    noise_tex = build_noise_tex(512);
+    vect_tex = build_vector_tex(vf);
 
-    rebuildStreamlines(vf);
+    rebuild_streamlines(vf);
     std::cout << "set done" << std::endl;
 }
 
@@ -166,19 +164,18 @@ int main(int argc, char **argv){
 
     init_data();
 
-    int shaderProgram = 0;
+    Shader streamline_shader("shader/shader.vert", "shader/shader.frag");
+    Shader lic_shader("shader/lic.vert", "shader/lic.frag");
 
-    Shader shader("shader/shader.vert", "shader/shader.frag");
-    Shader licShader("shader/lic.vert", "shader/lic.frag");
-
-    proj = glm::ortho(0.0f, float(vf.getHeight()),
-        0.0f, float(vf.getWidth()),
+    proj = glm::ortho(0.0f, float(vf.get_height()),
+        0.0f, float(vf.get_width()),
         -1.0f, 1.0f);
 
-    std::cout << vf.getHeight() << " " << vf.getWidth() << std::endl;
-    int imgRotation = 0;
-    bool  flipX = false;
-    bool  flipY = false;
+    std::cout << vf.get_height() << " " << vf.get_width() << std::endl;
+
+    int img_rotate = 0;
+    bool  flip_x = false;
+    bool  flip_y = false;
     bool show_lic = true;
     bool show_sl = true;
 
@@ -190,50 +187,50 @@ int main(int argc, char **argv){
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        static int prevCols = seedCols;
-        static int prevRows = seedRows;
-        static float prevStep = stepSize;
-        static int prevMax = maxSteps;
+        static int prev_cols = seed_cols;
+        static int prev_rows = seed_rows;
+        static float prev_step = step_size;
+        static int prev_max = max_steps;
 
         ImGui::Begin("Streamline Parameters");
-        ImGui::SliderInt("Seed Columns", &seedCols, 1, 100);
-        ImGui::SliderInt("Seed Rows", &seedRows, 1, 100);
-        ImGui::SliderInt("Max Steps", &maxSteps, 10, 2000);
-        ImGui::SliderFloat("Step Size", &stepSize, 0.01f, 5.0f);
+        ImGui::SliderInt("Seed Columns", &seed_cols, 1, 100);
+        ImGui::SliderInt("Seed Rows", &seed_rows, 1, 100);
+        ImGui::SliderInt("Max Steps", &max_steps, 10, 2000);
+        ImGui::SliderFloat("Step Size", &step_size, 0.01f, 5.0f);
 
-        if(seedCols != prevCols ||
-            seedRows != prevRows ||
-            stepSize != prevStep ||
-            maxSteps != prevMax){
-            prevCols = seedCols;
-            prevRows = seedRows;
-            prevStep = stepSize;
-            prevMax = maxSteps;
-            rebuildStreamlines(vf);
+        if(seed_cols != prev_cols ||
+            seed_rows != prev_rows ||
+            step_size != prev_step ||
+            max_steps != prev_max){
+            prev_cols = seed_cols;
+            prev_rows = seed_rows;
+            prev_step = step_size;
+            prev_max = max_steps;
+            rebuild_streamlines(vf);
         }
         ImGui::End();
 
         ImGui::Begin("Transform");
         if(ImGui::Button("Rotate 90°")){
-            imgRotation = (imgRotation - 90 + 360) % 360;
+            img_rotate = (img_rotate - 90 + 360) % 360;
         }
-        ImGui::Checkbox("Flip Horizontal", &flipX);
-        ImGui::Checkbox("Flip Vertical", &flipY);
+        ImGui::Checkbox("Flip Horizontal", &flip_x);
+        ImGui::Checkbox("Flip Vertical", &flip_y);
         ImGui::Checkbox("Show LIC", &show_lic);
         ImGui::Checkbox("Show Steam Line", &show_sl);
         ImGui::End();
 
 
         glm::mat4 model(1.0f);
-        float cx = vf.getWidth() * 0.5f;
-        float cy = vf.getHeight() * 0.5f;
+        float cx = vf.get_width() * 0.5f;
+        float cy = vf.get_height() * 0.5f;
         model = glm::translate(model, { cx, cy, 0.0f });
         model = glm::rotate(model,
-            glm::radians((float) imgRotation),
+            glm::radians((float) img_rotate),
             glm::vec3(0, 0, 1));
         model = glm::scale(model,
-            { flipX ? -1.0f : 1.0f,
-                flipY ? -1.0f : 1.0f,
+            { flip_x ? -1.0f : 1.0f,
+                flip_y ? -1.0f : 1.0f,
                 1.0f });
         model = glm::translate(model, { -cx, -cy, 0.0f });
         glm::mat4 mvp = proj * model;
@@ -246,24 +243,24 @@ int main(int argc, char **argv){
         glDepthMask(GL_FALSE);
 
         if(show_lic){
-            licShader.use();
-            licShader.setMat4("uMVP", mvp);
-            glBindVertexArray(quadVAO);
+            lic_shader.use();
+            lic_shader.set_mat4("uMVP", mvp);
+            glBindVertexArray(quad_vao);
             glDrawArrays(GL_TRIANGLES, 0, 6);
             glBindVertexArray(0);
 
             glActiveTexture(GL_TEXTURE0);
-            glBindTexture(GL_TEXTURE_2D, noiseTex);
-            licShader.setInt("uNoise", 0);
+            glBindTexture(GL_TEXTURE_2D, noise_tex);
+            lic_shader.set_int("uNoise", 0);
 
             glActiveTexture(GL_TEXTURE1);
-            glBindTexture(GL_TEXTURE_2D, vectorTex);
-            licShader.setInt("uVectorField", 1);
+            glBindTexture(GL_TEXTURE_2D, vect_tex);
+            lic_shader.set_int("uVectorField", 1);
 
-            licShader.setFloat("uStepSize", 1.0f / float(std::max(vf.getWidth(), vf.getHeight())));
-            licShader.setInt("uNumSteps", 20);
+            lic_shader.set_float("uStepSize", 1.0f / float(std::max(vf.get_width(), vf.get_height())));
+            lic_shader.set_int("uNumSteps", 20);
 
-            glBindVertexArray(quadVAO);
+            glBindVertexArray(quad_vao);
             glDrawArrays(GL_TRIANGLES, 0, 6);
             glBindVertexArray(0);
         }
@@ -273,12 +270,12 @@ int main(int argc, char **argv){
         glClear(GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
         if(show_sl){
-            shader.use();
-            shader.setMat4("uMVP", mvp);
-            glBindVertexArray(streamlineVAO);
+            streamline_shader.use();
+            streamline_shader.set_mat4("uMVP", mvp);
+            glBindVertexArray(streamline_vao);
             int offset = 0;
-            for(size_t k = 0; k < lineVertexCounts.size(); ++k){
-                float t = (seedGradients[k] - gmin) / (gmax - gmin);
+            for(size_t k = 0; k < line_vert_cnt.size(); ++k){
+                float t = (seed_grad[k] - gmin) / (gmax - gmin);
                 t = glm::clamp(t, 0.0f, 1.0f);
 
                 glm::vec3 col = glm::mix(
@@ -286,10 +283,10 @@ int main(int argc, char **argv){
                     glm::vec3(1.0f, 0.0f, 0.0f),  // 红
                     t
                 );
-                shader.setVec3("uColor", col);
+                streamline_shader.set_vec3("uColor", col);
 
-                glDrawArrays(GL_LINE_STRIP, offset, lineVertexCounts[k]);
-                offset += lineVertexCounts[k];
+                glDrawArrays(GL_LINE_STRIP, offset, line_vert_cnt[k]);
+                offset += line_vert_cnt[k];
             }
         }
         glBindVertexArray(0);
