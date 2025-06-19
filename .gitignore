@@ -1,3 +1,11 @@
 .vscode
 build
 Vector
+document.aux
+document.fls
+document.log
+document.out
+document.pdf
+document.synctex.gz
+document.toc
+imgui.ini
